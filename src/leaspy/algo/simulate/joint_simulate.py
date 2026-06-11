@@ -345,29 +345,16 @@ class JointSimulationAlgorithm(SimulationAlgorithm):
         df_long = df_estimated[list(self.features)].clip(upper=0.9999999, lower=0.00000001)
         df_long.columns = [feat + "_no_noise" for feat in self.features]
 
-        # --- Step 2: add beta-distributed noise ---
+        # --- Step 2: add Gaussian noise (clipped to (0, 1)) ---
         for i, feat in enumerate(self.features):
             if model.parameters["noise_std"].numel() == 1:
-                mu = df_long[feat + "_no_noise"]
-                var = float(model.parameters["noise_std"].numpy() ** 2)
+                noise_std = float(model.parameters["noise_std"].numpy())
             else:
-                mu = df_long[feat + "_no_noise"]
-                var = float(model.parameters["noise_std"][i].numpy() ** 2)
+                noise_std = float(model.parameters["noise_std"][i].numpy())
 
-            max_var = mu * (1 - mu)
-            adj_var = np.minimum(var, 0.99 * max_var)
-            differences = adj_var[adj_var != var]
-            for (ID, TIME), adj_val in differences.items():
-                warnings.warn(
-                    f"Patient {ID} is too advanced in the disease at TIME "
-                    f"{np.round(TIME, 3)}. Variance value ({np.round(var, 3)}) "
-                    f"out of range for feature {feat}, clamped to "
-                    f"{np.round(adj_val, 3)}."
-                )
-
-            alpha_param = mu * ((mu * (1 - mu) / adj_var) - 1)
-            beta_param = (1 - mu) * ((mu * (1 - mu) / adj_var) - 1)
-            df_long.loc[:, feat] = beta.rvs(alpha_param, beta_param)
+            mu = df_long[feat + "_no_noise"].values
+            noisy = mu + np.random.normal(0.0, noise_std, size=len(mu))
+            df_long.loc[:, feat] = noisy.clip(0.00000001, 0.9999999)
 
         # --- Step 3: simulate event times via inverse CDF sampling ---
         # The estimate output already contains event predictions (in addition to
